@@ -1,80 +1,44 @@
-# argoverse_cbgs_kf_tracker
+# Simple Gaussian Mixture Filter (Tracker) argoverse_simple_gmf_tracker
+
+## Summary
+
+This is a modified version of the [Open Argoverse CBGS-KF Tracker](https://github.com/johnwlambert/argoverse_cbgs_kf_tracker) used for the second place submission for the [2020 Argoverse 3D Tracking Competition](https://evalai.cloudcv.org/web/challenges/challenge-page/453/leaderboard/1278). For a more detailed explanation, please refer to the [original repository](https://github.com/johnwlambert/argoverse_cbgs_kf_tracker).
+
+## Changes
+
+Rather than using AB3DMOT's max_age and min_hits parameters, this Gaussian mixture filter uses more conventional parameters for managing Gaussian mixtures ([RFS Example](https://github.com/apak-00/rfs-filters-ssa/blob/master/RFSTest/MixtureModels.cpp)), namely:
+
+ - Each Gaussian component is weighted (w_i, [0,1]), weight is directly proportional to classification score and evolves according to it.
+ - Probability of survival (p_s [0,1]) - probability of target survival between a consecutive time steps.
+ - Estimate threshold (t_e [0,1]) - threshold above which to report tracked targets.
+ - Prune threshold (t_p [0,1]) - threshold below which to remove Gaussian components from the tracker.
+ 
+ - Small part of Mahalanobis distance code is taken from [Probabilistic 3D Multi-Object Tracking for Autonomous Driving](https://github.com/eddyhkchiu/mahalanobis_3d_multi_object_tracking).
+ - A model that is closer to the constant velocity model (even not exactly) is used for tracking (delta timestep is taken into account).
+ 
+ Essentially, only probability of survival p_s and estimate threshold needs to be tuned as prune threshold can be set to some low value according to performance considerations.
+ 
+ ## Results on Argoverse Leaderboard
 
 
-## Precomputed 3D Detections
-The precomputed 3D detections were computed on the Argoverse dataset using the method described in [Class-balanced Grouping and Sampling for Point Cloud 3D Object Detection](https://arxiv.org/abs/1908.09492), with detection range increased to 100 meters in each direction and pruned to ROI to match Argoverse annotation policy.
-
-The detections can be freely downloaded at our [3d tracking competition page](https://evalai.cloudcv.org/web/challenges/challenge-page/453/overview) [[.zip]](https://s3.amazonaws.com/argoai-argoverse/detections_v1.1b.zip).
-
-## Kalman Filter Tracking
-This code extends [AB3DMOT](https://github.com/xinshuoweng/AB3DMOT), subject to its [license](https://github.com/xinshuoweng/AB3DMOT/blob/master/LICENSE). However, instead of tracking in the camera coordinate frame (as AB3DMOT does), we perform tracking in the Argoverse city coordinate frame [(see Argoverse paper and appendix)](https://arxiv.org/abs/1911.02620).
-
-Instead of greedily matching sporadic detections, we solve a number of independent estimation problems (filtering) in a factor graph. Specifically, we use the IoU metric to perform data association (decoupling the estimation problems), and then consider each 3D detection as a measurement of an unknown state for a particular vehicle.
-
-## Results on Argoverse Leaderboard
-As of Wednesday April 15, 2020 this implementation took 1st place on the Argoverse 3d tracking test set ([leaderboard](https://evalai.cloudcv.org/web/challenges/challenge-page/453/leaderboard/1278)). Several per-metric results are here:
-
-   |  Car <br> MOTA  |  Pedestrian <br>MOTA | Car <br> MOTPD   | Pedestrian <br> MOTPD | Car MT <br> (Mostly Tracked) | Pedestrian MT <br> (Mostly Tracked)   | Car <br> FN  | Ped. <br> FN |  
-   | :-----: | :----------: | :-----: |  :--------: | :------------------: | :--------------: | :----: | :--:   |
-   | 65.90   | 48.31        |  0.34   | 0.37        | 0.51                 | 0.28             | 23,594 | 25,780 |
-
-
-## Choice of Coordinate Frame
-
-Tracking in the "city frame" is advantageous over tracking in the egovehicle frame or camera coordinate frame since parked cars are constant in the city frame. You can find our technical report [here](https://drive.google.com/file/d/1TlrZDQTz3c9t7lXmUWcatF0sGjv14Era/view?usp=sharing) (runner up at Neurips 19 Argoverse 3D Tracking Competition that used less high-quality detections from PointPillars, achieving 48.33 Car MOTA).
+ [Leaderboard](https://evalai.cloudcv.org/web/challenges/challenge-page/453/leaderboard/1278#leaderboardrank-2) classes: (C)ar, (P)edestrian.
+ 
+|  | C:MOTA | P:MOTA | C:MOTPD | P:MOTPD | C:MOTPO | P:MOTPO | C:MOTPI | P:MOTPI | C:IDF1 | P:IDF1 |
+|----------------|--------|--------|---------|---------|---------|---------|---------|---------|--------|--------|
+| Simple GMF     | 71.54  | 49.62  | 0.33    | 0.36    | 11.60   | 23.20   | 0.18    | 0.18    | 0.81   | 0.60   |
+| Baseline       | 65.90  | 48.31  | 0.34    | 0.37    | 15.97   | 25.04   | 0.20    | 0.18    | 0.79   | 0.58   |
 
 ## Running the Code
 
-First, install the `argoverse-api` module from [here](https://github.com/argoai/argoverse-api). Also download the data (egovehicle poses will be necessary),
-
-Next, download the detections [zip file](https://s3.amazonaws.com/argoai-argoverse/detections_v1.1b.zip), unzip them. 
-
-To run the tracker, pass the path to the unzipped detections directory, which should end in `argoverse_detections_2020`, to `run_ab3dmot.py`, as shown below:
-
-```
-DETECTIONS_DATAROOT="/path/to/argoverse_detections_2020" # replace with your own path
-POSE_DIR="/path/to/argoverse/data" # should be either val or test set directory
-SPLIT="val" # should be either 'val' or 'test'
-python run_ab3dmot.py --dets_dataroot $DETECTIONS_DATAROOT --pose_dir $POSE_DIR --split $SPLIT
-```
-
-<p align="left">
-  <img src="videos/de6c96c4-f2b2-3f0f-9971-ed35f4118c1e_ring_front_center_30fps.gif" height="280">
-  <img src="videos/21e37598-52d4-345c-8ef9-03ae19615d3d_ring_front_center_30fps.gif" height="280">
-</p>
-<p align="center">
-  <img src="videos/1e5d7745-c7b3-31a0-ae57-c480fcaa220e_ring_front_center_30fps.gif" height="280">
-</p>
-
-
-## Brief Explanation of Repo Contents
-
-- `ab3dmot.py`: kalman filter state management (modified from [original](https://github.com/xinshuoweng/AB3DMOT))
-- `detections_README.md`: explanation of how detections are provided
-- `iou_utils.py`: simple intersection-over-union utilities
-- `run_ab3dmot.py`: execute the tracker on 3d detections which must be provided in egovehicle frame
-- `transform_utils.py`: upgrade SE(2) poses to SE(3) and vice versa
-
-- `tests`
-    - `test_iou_utils.py`: a few unit tests
-- `visualization` (can be ignored): patches on argoverse-api for better visualization/easier eval
-    - `cuboids_to_bboxes.py`: improved script for visualizing tracks (original is in argoverse-api)
-    - `object_label_record.py`: updated classes to support visualizing tracks (original is in argoverse-api)
-    - `eval_tracking.py`: slightly more user-friendly interface for evaluation script
-    - `dump_to_argoverse.py`: Lift SE(2) detections (e.g. PointPillars) to SE(3)
+TODO
 
 ## Citing this work
+
 Open-source Implementation
-```
+
 @misc{
-    author = {John Lambert},
-    title = {Open Argoverse CBGS-KF Tracker},
-    howpublished={\url{https://github.com/johnwlambert/argoverse_cbgs_kf_tracker}},
+    author = {Andrey Pak},
+    title = {Simple Gaussian Mixture Filter (Tracker)},
+    howpublished={\url{https://github.com/apak-00/argoverse_simple_gmf_tracker/}},
     year = {2020},
 }
-```
-
-
-## License
-
-This code is provided by myself for purely non-commercial, research purposes. It may not be used commercially in a product without my permission.
