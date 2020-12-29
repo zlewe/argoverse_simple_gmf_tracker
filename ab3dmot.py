@@ -86,14 +86,10 @@ class KalmanBoxTracker(object):
     KalmanBoxTracker.count += 1
 
     self.history = []
-    self.hits = 1           # number of total hits including the first detection
-    self.hit_streak = 1     # number of continuing hit considering the first detection
-    self.first_continuing_hit = 1
-    self.still_first = True
-    self.age = 0
+
     self.info = info        # other info
 
-    # Test new
+    # Initialise weight of this tracker as confidence of the detection
     self.w = conf
     self.ps = ps
 
@@ -101,17 +97,9 @@ class KalmanBoxTracker(object):
     """ 
     Updates the state vector with observed bbox.
     """
+    # Update weight of this tracker with adding confidence to weight. (0 <= weight <= 1)
+    self.w = min(1, self.w + conf)
 
-    self.w += conf
-    if self.w > 1:
-      self.w = 1
-
-    self.history = []
-    self.hits += 1
-    self.hit_streak += 1          # number of continuing hit
-
-    if self.still_first:
-      self.first_continuing_hit += 1      # number of continuing hit in the fist time
     
     ######################### orientation correction
     if self.kf.x[3] >= np.pi: self.kf.x[3] -= np.pi * 2    # make the theta still in the range
@@ -151,11 +139,11 @@ class KalmanBoxTracker(object):
     if self.kf.x[3] >= np.pi: self.kf.x[3] -= np.pi * 2
     if self.kf.x[3] < -np.pi: self.kf.x[3] += np.pi * 2
 
-    self.age += 1
+    # self.age += 1
 
     self.history.append(self.kf.x)
 
-    # Multiply by p_s
+    # Multiply by ps (probability of survival for each timestep)
     self.w *= self.ps
 
     return self.history[-1]
@@ -193,6 +181,7 @@ def associate_detections_to_trackers(
   for d,det in enumerate(detections):
     for t,trk in enumerate(trackers):
       
+      # Use mahalanobis distance instead of iou of detections to match previous detections (from stanford paper i think)
       if distance=='m':
 
         S_inv = np.linalg.inv(trks_S[t]) # 7 x 7
@@ -212,12 +201,13 @@ def associate_detections_to_trackers(
 
         distance_matrix = -iou_matrix
 
-  matched_indices = linear_assignment(distance_matrix)      # hungarian algorithm
+  matched_indices = linear_assignment(distance_matrix)      # hungarian algorithm (Note, scipy.optimize variant is not a proper one for tracking, see: https://github.com/scikit-learn/scikit-learn/issues/13464)
 
   unmatched_detections = []
   for d,det in enumerate(detections):
     if(d not in matched_indices[:,0]):
       unmatched_detections.append(d)
+  
   unmatched_trackers = []
   for t,trk in enumerate(trackers):
     if(t not in matched_indices[:,1]):
@@ -259,9 +249,9 @@ class AB3DMOT(object):
     self.trackers = []
     self.frame_count = 0
 
-    self.ps = ps
-    self.thr_estimate = thr_estimate
-    self.thr_prune = 0.1
+    self.ps = ps #probability of survival
+    self.thr_estimate = thr_estimate #weight threshold to report tracker result
+    self.thr_prune = 0.1 #weight threshold to prune tracker result
 
     # self.reorder = [3, 4, 5, 6, 2, 1, 0]
     # self.reorder_back = [6, 5, 4, 0, 1, 2, 3]
@@ -285,7 +275,7 @@ class AB3DMOT(object):
     NOTE: The number of objects returned may differ from the number of detections provided.
     """
     dets, info = dets_all['dets'], dets_all['info']         # dets: N x 7, float numpy array
-    conf = dets_all['conf']
+    conf = dets_all['conf'] #confidence of dets
 
     # dets = dets[:, self.reorder]
     self.frame_count += 1
@@ -357,12 +347,12 @@ class AB3DMOT(object):
     for trk in reversed(self.trackers):
         d = trk.get_state()      # bbox location
 
-        if (trk.w >= self.thr_estimate):
+        if (trk.w >= self.thr_estimate): # if weight larger than estimate threshold, add tracker to result
           ret.append(np.concatenate((d, [trk.id+1], trk.info)).reshape(1,-1))
         
         i -= 1
 
-        if trk.w <= self.thr_prune:
+        if trk.w <= self.thr_prune: # if weight smaller than prune threshold, remove trackers (means it does not survive)
           self.trackers.pop(i)
 
     if(len(ret)>0):

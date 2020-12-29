@@ -27,6 +27,7 @@ from transform_utils import (
 )
 from json_utils import read_json_file, save_json_dict
 
+#import evaluation methods to automate grid search
 from argoverse.evaluation.competition_util import generate_tracking_zip
 from argoverse.evaluation.eval_tracking import eval_tracks
 
@@ -37,7 +38,6 @@ def check_mkdir(dirpath):
     """ """
     if not Path(dirpath).exists():
         os.makedirs(dirpath, exist_ok=True)
-
 
 
 class UUIDGeneration():
@@ -75,12 +75,10 @@ def run_ab3dmot(
     pose_dir: str,
     dets_dump_dir: str,
     tracks_dump_dir: str,
-    max_age: int = 3,
-    min_hits: int = 1,
     min_conf: float = 0.3,
-    match_algorithm: str = 'h',
+    match_algorithm: str = 'h', #hungarian
     match_threshold: float = 4,
-    match_distance: float = 'iou',
+    match_distance: float = 'iou', 
     p: np.ndarray = np.eye(10),
     thr_estimate: float = 0.8,
     thr_prune: float = 0.1,
@@ -238,18 +236,27 @@ def run_ab3dmot(
 
 if __name__ == '__main__':
 
+
+    SUBMIT = True
+    SUBMIT_VEH_THR = 0.4
+    SUBMIT_VEH_PS = 0.8
+    SUBMIT_PED_THR = 0.45
+    SUBMIT_PED_PS = 0.83
+
+    ps_grid = [0.7]
+    th_grid = [0.65]
+
     split = 'val'
-    #path_dataset = "/media/sda1/argoverse-tracking"
-    path_dataset = "../../Data/argoverse"
-    path_detections = f"{path_dataset}/argoverse_detections_2020/{split}"
+    path_dataset = "/media/arg/ARG-James/tracking_dataset/argoverse-tracking"
+    path_detections = f"{path_dataset}/argoverse_detections_2020/validation"
     path_data = f"{path_dataset}/{split}"
     path_results = f"{path_dataset}/results/results_tracking_{split}_cbgs"
     
     filename_v = f"{path_dataset}/results/v_grid_{split}_cbgs.txt"
     filename_p = f"{path_dataset}/results/p_grid_{split}_cbgs.txt"
 
+
     min_conf = 0.3
-    #match_threshold = 10
     match_distance = 'iou'
 
     p_pos_mult, p_vel_mult = 1, 1
@@ -259,12 +266,79 @@ if __name__ == '__main__':
 
     thr_prune = 0.01
 
-    for thr_estimate in [0.25, 0.3, 0.35]:
-       for ps in [0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]:
+    if not SUBMIT:
+        for ps in ps_grid:
+            for thr_estimate in th_grid:
 
+                if os.path.exists(path_results):
+                    shutil.rmtree(path_results)
+                
+                match_threshold = 0.001
+                min_conf = 0.3
+
+                time_start = time.time()
+
+                #Vehicle
+                run_ab3dmot('VEHICLE', path_data, path_detections, path_results,
+                    min_conf=min_conf,
+                    match_algorithm ='h',
+                    match_threshold = match_threshold,
+                    match_distance = match_distance,
+                    p = p,
+                    thr_estimate = thr_estimate,
+                    thr_prune=thr_prune,
+                    ps = ps
+                )
+
+                print(f"Elapsed tracking vehicle {time.time() - time_start}")
+
+                time_start = time.time()
+
+                with open(filename_v, "a+") as out_file:
+                    out_file.write(f"{p_vel_mult} min_conf {min_conf} match_thr {match_threshold} {thr_prune} {thr_estimate} {ps} ")
+                    eval_tracks(path_results, path_data, 0, 100, out_file, 'average',
+                                diffatt=None, category='VEHICLE')
+
+                print(f"Elapsed evaluating vehicle {time.time() - time_start}")
+
+                if os.path.exists(path_results):
+                    shutil.rmtree(path_results)
+                
+                match_threshold = 0.001
+                min_conf = 0.26
+
+                time_start = time.time()
+
+                # Pedestrian
+                run_ab3dmot('PEDESTRIAN', path_data, path_detections, path_results,
+                    min_conf=min_conf,
+                    match_algorithm ='h',
+                    match_threshold = match_threshold,
+                    match_distance = match_distance,
+                    p = p,
+                    thr_estimate = thr_estimate,
+                    thr_prune=thr_prune,
+                    ps = ps
+                )
+
+                print(f"Elapsed tracking pedestrian {time.time() - time_start}")
+
+                time_start = time.time()
+
+                with open(filename_p, "a+") as out_file:
+                    out_file.write(f"{p_vel_mult} min_conf {min_conf} match_thr {match_threshold} {thr_prune} {thr_estimate} {ps} ")
+                    eval_tracks(path_results, path_data, 0, 100, out_file, 'average',
+                                diffatt=None, category='PEDESTRIAN')
+
+                print(f"Elapsed evaluating pedestrian {time.time() - time_start}")
+
+                generate_tracking_zip(f"{path_dataset}/results/results_tracking_{split}_cbgs", 
+                    f"{path_dataset}/results")
+
+    else:
         if os.path.exists(path_results):
             shutil.rmtree(path_results)
-        
+
         match_threshold = 0.001
         min_conf = 0.3
 
@@ -277,24 +351,12 @@ if __name__ == '__main__':
             match_threshold = match_threshold,
             match_distance = match_distance,
             p = p,
-            thr_estimate = thr_estimate,
+            thr_estimate = SUBMIT_VEH_THR,
             thr_prune=thr_prune,
-            ps = ps
+            ps = SUBMIT_VEH_PS
         )
 
         print(f"Elapsed tracking vehicle {time.time() - time_start}")
-
-        time_start = time.time()
-
-        with open(filename_v, "a+") as out_file:
-            out_file.write(f"{p_vel_mult} min_conf {min_conf} match_thr {match_threshold} {thr_prune} {thr_estimate} {ps} ")
-            eval_tracks(path_results, path_data, 0, 100, out_file, 'average',
-                        diffatt=None, category='VEHICLE')
-
-        print(f"Elapsed evaluating vehicle {time.time() - time_start}")
-
-        if os.path.exists(path_results):
-            shutil.rmtree(path_results)
         
         match_threshold = 0.001
         min_conf = 0.26
@@ -308,21 +370,13 @@ if __name__ == '__main__':
             match_threshold = match_threshold,
             match_distance = match_distance,
             p = p,
-            thr_estimate = thr_estimate,
+            thr_estimate = SUBMIT_PED_THR,
             thr_prune=thr_prune,
-            ps = ps
+            ps = SUBMIT_PED_PS
         )
 
         print(f"Elapsed tracking pedestrian {time.time() - time_start}")
 
-        time_start = time.time()
-
-        with open(filename_p, "a+") as out_file:
-            out_file.write(f"{p_vel_mult} min_conf {min_conf} match_thr {match_threshold} {thr_prune} {thr_estimate} {ps} ")
-            eval_tracks(path_results, path_data, 0, 100, out_file, 'average',
-                        diffatt=None, category='PEDESTRIAN')
-
-        print(f"Elapsed evaluating pedestrian {time.time() - time_start}")
-
+        #output submission zip
         generate_tracking_zip(f"{path_dataset}/results/results_tracking_{split}_cbgs", 
-            f"{path_dataset}/results")
+            f"{path_dataset}/results") 
